@@ -19,7 +19,6 @@
  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  """
 
-#!/bin/env python3
 
 from mininet.topo import Topo
 from mininet.net import Mininet
@@ -34,9 +33,8 @@ class NetworkTopo(Topo):
 
         Topo.__init__(self)
 
-        # -------------------------
+        
         # Hosts
-        # -------------------------
 
         h1 = self.addHost(
             'h1',
@@ -66,9 +64,7 @@ class NetworkTopo(Topo):
             defaultRoute='via 10.0.2.1'
         )
 
-        # -------------------------
         # Switches
-        # -------------------------
 
         s1 = self.addSwitch('s1')
 
@@ -79,18 +75,14 @@ class NetworkTopo(Topo):
             dpid='0000000000000003'
         )
 
-        # -------------------------
         # Link configuration
-        # -------------------------
 
         link_config = dict(
             bw=15,
             delay='10ms'
         )
 
-        # -------------------------
         # Links
-        # -------------------------
 
         self.addLink(h1, s1, **link_config)
 
@@ -99,6 +91,8 @@ class NetworkTopo(Topo):
         self.addLink(s1, s3, **link_config)   # -> Port 1
         self.addLink(s3, s2, **link_config)   # -> Port 2
         self.addLink(ext, s3, **link_config)  # -> Port 3
+
+        self.addLink(ext, s3, **link_config)
 
         self.addLink(s2, ser, **link_config)
 

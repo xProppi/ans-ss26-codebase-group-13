@@ -19,14 +19,13 @@
  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  """
 
-#!/bin/env python3
 
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.ofproto import ofproto_v1_3
-from ryu.lib.packet import packet, ethernet, ether_types, arp, ipv4
+from ryu.lib.packet import packet, ethernet, ether_types, arp, ipv4, icmp
 
 class LearningSwitch(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -56,6 +55,10 @@ class LearningSwitch(app_manager.RyuApp):
         # buffer for packets that are waiting for arp replies 
         self.pend_packets = {}
 
+        self.EXT_IP       = "192.168.1.123"
+        self.SER_IP       = "10.0.2.2"
+        self.INTERNAL_IPS = ["10.0.1.2", "10.0.1.3", "10.0.2.2"]
+
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
@@ -67,6 +70,9 @@ class LearningSwitch(app_manager.RyuApp):
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
+
+        if datapath.id == 3:
+            self._install_security_rules(datapath, parser)
 
     def add_flow(self, datapath, priority, match, actions, buffer_id=None):
         ofproto = datapath.ofproto
@@ -104,21 +110,19 @@ class LearningSwitch(app_manager.RyuApp):
         arp_pkt = pkt.get_protocol(arp.arp)
         ipv4_pkt = pkt.get_protocol(ipv4.ipv4)
 
-        # ---------------------------------------------------------
         # ROUTER LOGIC (s3)
-        # ---------------------------------------------------------
+        
         if dpid == 3:
             if arp_pkt:
                 self.handle_arp(datapath, in_port, eth, arp_pkt, parser, ofproto)
                 return
     
             if ipv4_pkt:
-                self.handle_ipv4(datapath, in_port, eth, ipv4_pkt, parser, ofproto, msg)
+                self.handle_ipv4(datapath, in_port, eth, ipv4_pkt, parser, ofproto, msg, pkt)
                 return
 
-        # ---------------------------------------------------------
         # SWITCH LOGIC (s1, s2)
-        # ---------------------------------------------------------
+
         elif dpid in [1, 2]:
             dst = eth.dst
             src = eth.src
@@ -153,6 +157,47 @@ class LearningSwitch(app_manager.RyuApp):
                 data=msg.data
             )
             datapath.send_msg(out)
+
+    def _install_security_rules(self, datapath, parser):
+        drop = []
+        for ip in self.INTERNAL_IPS:
+            self.add_flow(datapath, 100, parser.OFPMatch(
+                eth_type=0x0800, ip_proto=1,
+                ipv4_src=self.EXT_IP, ipv4_dst=ip), drop)
+        self.add_flow(datapath, 100, parser.OFPMatch(
+            eth_type=0x0800, ip_proto=6,
+            ipv4_src=self.EXT_IP, ipv4_dst=self.SER_IP), drop)
+        self.add_flow(datapath, 100, parser.OFPMatch(
+            eth_type=0x0800, ip_proto=6,
+            ipv4_src=self.SER_IP, ipv4_dst=self.EXT_IP), drop)
+        self.add_flow(datapath, 100, parser.OFPMatch(
+            eth_type=0x0800, ip_proto=17,
+            ipv4_src=self.EXT_IP, ipv4_dst=self.SER_IP), drop)
+        self.add_flow(datapath, 100, parser.OFPMatch(
+            eth_type=0x0800, ip_proto=17,
+            ipv4_src=self.SER_IP, ipv4_dst=self.EXT_IP), drop)
+
+    def _send_icmp_reply(self, datapath, in_port, eth, ipv4_pkt, icmp_pkt, parser, ofproto):
+        router_ip  = self.port_to_own_ip[in_port]
+        router_mac = self.port_to_own_mac[in_port]
+        reply = packet.Packet()
+        reply.add_protocol(ethernet.ethernet(
+            dst=eth.src, src=router_mac, ethertype=ether_types.ETH_TYPE_IP))
+        reply.add_protocol(ipv4.ipv4(
+            dst=ipv4_pkt.src, src=router_ip, proto=1, ttl=64))
+        # copy the original echo data as-is so id/seq are preserved in the raw bytes
+        echo_data = icmp_pkt.data
+        reply.add_protocol(icmp.icmp(
+            type_=icmp.ICMP_ECHO_REPLY, code=0, csum=0,
+            data=echo_data))
+        reply.serialize()
+        out = parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=ofproto.OFP_NO_BUFFER,
+            in_port=ofproto.OFPP_CONTROLLER,
+            actions=[parser.OFPActionOutput(in_port)],
+            data=reply.data)
+        datapath.send_msg(out)
 
     def handle_arp(self, datapath, in_port, eth, arp_pkt, parser, ofproto):
         # Add IP to MAC mapping to cache
@@ -235,12 +280,16 @@ class LearningSwitch(app_manager.RyuApp):
             )
             datapath.send_msg(out)
 
-    def handle_ipv4(self, datapath, in_port, eth, ipv4_pkt, parser, ofproto, msg): 
+    def handle_ipv4(self, datapath, in_port, eth, ipv4_pkt, parser, ofproto, msg, pkt=None): 
         dst_ip = ipv4_pkt.dst
 
-        # Catch if the packet is directed at the router itself
         if dst_ip in self.port_to_own_ip.values():
-            # TODO: ICMP-Reply handling PERSON 3 / AMIN
+            for port, ip in self.port_to_own_ip.items():
+                if ip == dst_ip and port == in_port and pkt is not None:
+                    icmp_pkt = pkt.get_protocol(icmp.icmp)
+                    if icmp_pkt and icmp_pkt.type == icmp.ICMP_ECHO_REQUEST:
+                        self._send_icmp_reply(datapath, in_port, eth,
+                                              ipv4_pkt, icmp_pkt, parser, ofproto)
             return
 
         # Determine output port based on subnet
@@ -299,8 +348,6 @@ class LearningSwitch(app_manager.RyuApp):
             )
             datapath.send_msg(out_req)
             return
-        
-        # TODO: Check traffic between ext PERSON 3 / AMIN
         
         router_mac_out = self.port_to_own_mac[out_port]
         match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=dst_ip)
