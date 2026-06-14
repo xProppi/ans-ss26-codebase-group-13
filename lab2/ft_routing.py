@@ -1,6 +1,22 @@
 """
  Copyright (c) 2025 Computer Networks Group @ UPB
- [licence omitted for brevity]
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy of
+ this software and associated documentation files (the "Software"), to deal in
+ the Software without restriction, including without limitation the rights to
+ use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+ the Software, and to permit persons to whom the Software is furnished to do so,
+ subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in all
+ copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
 #!/usr/bin/env python3
@@ -26,7 +42,6 @@ from ryu.lib import hub
 import topo
 
 # One MAC per subnet gateway — used for ARP proxy replies
-# The edge switch "pretends" to be the gateway with this MAC
 GATEWAY_MAC = "00:00:00:00:ff:ff"
 
 
@@ -64,7 +79,7 @@ class FTRouter(app_manager.RyuApp):
         # Build classification and IP tables
         self._build_tables()
 
-    # ------------------------------------------------------------------ #
+  
     def _build_tables(self):
         k    = self.k
         half = self.half
@@ -110,9 +125,9 @@ class FTRouter(app_manager.RyuApp):
                          len(self.gateway_to_edge))
         self.logger.info("gateway_to_edge: %s", self.gateway_to_edge)
 
-    # ------------------------------------------------------------------ #
+    
     # Topology discovery
-    # ------------------------------------------------------------------ #
+
     @set_ev_cls(event.EventSwitchEnter)
     def get_topology_data(self, ev):
         # Switches and links in the network
@@ -154,7 +169,7 @@ class FTRouter(app_manager.RyuApp):
 
         self.logger.info("Rules installed on %d/20 switches", installed)
 
-    # ------------------------------------------------------------------ #
+    
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
@@ -170,7 +185,7 @@ class FTRouter(app_manager.RyuApp):
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
 
-    # ------------------------------------------------------------------ #
+
     def add_flow(self, datapath, priority, match, actions):
         ofproto = datapath.ofproto
         parser  = datapath.ofproto_parser
@@ -182,7 +197,7 @@ class FTRouter(app_manager.RyuApp):
                                 match=match, instructions=inst)
         datapath.send_msg(mod)
 
-    # ------------------------------------------------------------------ #
+
     def _dp(self, name):
         dpid = self.name_to_dpid.get(name)
         if dpid is None:
@@ -214,9 +229,9 @@ class FTRouter(app_manager.RyuApp):
             result.append((nb, port, nb_pod, nb_layer, nb_idx))
         return result
 
-    # ------------------------------------------------------------------ #
+
     # ROUTING RULES
-    # ------------------------------------------------------------------ #
+
     def _core_rules(self, sw_node, dp, parser):
         """Core: /16 prefix per pod, priority 1."""
         for nb, port, nb_pod, nb_layer, nb_idx in self._sw_nb(sw_node, layer='aggr'):
@@ -287,9 +302,9 @@ class FTRouter(app_manager.RyuApp):
                 )
                 self.add_flow(dp, 1, match, [parser.OFPActionOutput(port)])
 
-    # ------------------------------------------------------------------ #
+   
     # ARP PROXY — the missing piece
-    # ------------------------------------------------------------------ #
+
     def _send_arp_reply(self, datapath, in_port, src_mac, src_ip,
                         dst_mac, dst_ip, ofproto, parser):
         """Send an ARP reply from the controller acting as the gateway."""
@@ -317,9 +332,9 @@ class FTRouter(app_manager.RyuApp):
         )
         datapath.send_msg(out)
 
-    # ------------------------------------------------------------------ #
+
     # PacketIn handler
-    # ------------------------------------------------------------------ #
+   
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
         msg      = ev.msg
