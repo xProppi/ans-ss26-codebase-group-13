@@ -60,12 +60,18 @@ class FattreeNet(Topo):
         #
         # Create switches
         #
+
+        switch_counter = 1
+
         for sw in ft_topo.switches:
 
             node_map[sw.id] = self.addSwitch(
                 sw.id,
+                dpid=str(switch_counter).zfill(16),
                 protocols='OpenFlow13'
             )
+
+            switch_counter += 1
 
         #
         # Create hosts
@@ -116,7 +122,7 @@ def make_mininet_instance(graph_topo):
 
     net_topo = FattreeNet(graph_topo)
     net = Mininet(topo=net_topo, controller=None, autoSetMacs=True)
-    net.addController('c0', controller=RemoteController,
+    net.addController('controller', controller=RemoteController,
                       ip="127.0.0.1", port=6653)
     return net
 
